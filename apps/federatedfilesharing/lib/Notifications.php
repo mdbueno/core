@@ -85,35 +85,10 @@ class Notifications {
 	 * @throws \OC\ServerNotAvailableException
 	 */
 	public function sendRemoteShare($token, $shareWith, $name, $remote_id, $owner, $ownerFederatedId, $sharedBy, $sharedByFederatedId) {
-		list($user, $remote) = $this->addressHandler->splitUserRemote($shareWith);
-
-		if ($user && $remote) {
-			$url = $remote;
-			$local = $this->addressHandler->generateRemoteURL();
-
-			$fields = [
-				'shareWith' => $user,
-				'token' => $token,
-				'name' => $name,
-				'remoteId' => $remote_id,
-				'owner' => $owner,
-				'ownerFederatedId' => $ownerFederatedId,
-				'sharedBy' => $sharedBy,
-				'sharedByFederatedId' => $sharedByFederatedId,
-				'remote' => $local,
-			];
-
-			$url = $this->addressHandler->removeProtocolFromUrl($url);
-			$result = $this->tryHttpPostToShareEndpoint($url, '', $fields);
-			$status = \json_decode($result['result'], true);
-
-			if ($result['success'] && ($status['ocs']['meta']['statuscode'] === 100 || $status['ocs']['meta']['statuscode'] === 200)) {
-				\OC_Hook::emit('OCP\Share', 'federated_share_added', ['server' => $remote]);
-				return true;
-			}
+		$ocmRemoteShareSuccess = $this->sendOcmRemoteShare($token, $shareWith, $name, $remote_id, $owner, $ownerFederatedId, $sharedBy, $sharedByFederatedId);
+		if (!$ocmRemoteShareSuccess) {
+			return $this->sendPreOcmRemoteShare($token, $shareWith, $name, $remote_id, $owner, $ownerFederatedId, $sharedBy, $sharedByFederatedId);
 		}
-
-		return false;
 	}
 
 	/**
@@ -278,7 +253,7 @@ class Notifications {
 	 * @return array
 	 * @throws \Exception
 	 */
-	protected function tryHttpPostToShareEndpoint($remoteDomain, $urlSuffix, array $fields) {
+	protected function tryHttpPostToShareEndpoint($remoteDomain, $urlSuffix, array $fields, $useOcm = false) {
 		$client = $this->httpClientService->newClient();
 		$protocol = 'https://';
 		$result = [
@@ -288,7 +263,12 @@ class Notifications {
 		$try = 0;
 
 		while ($result['success'] === false && $try < 2) {
-			$endpoint = $this->discoveryManager->getShareEndpoint($protocol . $remoteDomain);
+			if ($useOcm) {
+				$endpoint = $this->discoveryManager->getOcmShareEndpoint($protocol . $remoteDomain);
+			} else {
+				$endpoint = $this->discoveryManager->getShareEndpoint($protocol . $remoteDomain);
+			}
+
 			try {
 				$response = $client->post($protocol . $remoteDomain . $endpoint . $urlSuffix . '?format=' . self::RESPONSE_FORMAT, [
 					'body' => $fields,
@@ -296,6 +276,7 @@ class Notifications {
 					'connect_timeout' => 10,
 				]);
 				$result['result'] = $response->getBody();
+				$result['statusCode'] = $response->getStatusCode();
 				$result['success'] = true;
 				break;
 			} catch (\Exception $e) {
@@ -315,5 +296,69 @@ class Notifications {
 		}
 
 		return $result;
+	}
+
+	protected function sendOcmRemoteShare($token, $shareWith, $name, $remote_id, $owner, $ownerFederatedId, $sharedBy, $sharedByFederatedId) {
+		list($user, $remote) = $this->addressHandler->splitUserRemote($shareWith);
+		if ($user && $remote) {
+			$fields = [
+				'shareWith' => $shareWith,
+				'name' => $name,
+				'providerId' => $remote_id,
+				'owner' => $ownerFederatedId,
+				'ownerDisplayName' => '',
+				'sender' => $sharedByFederatedId,
+				'senderDisplayName' => '',
+				'token' => $token,
+				'shareType' => 'user',
+				'resourceType' => 'file',
+				'protocol' => [
+					'name' => 'webdav',
+					'options' => [
+						'sharedSecret' => $token
+					]
+				]
+			];
+
+			$url = $this->addressHandler->removeProtocolFromUrl($remote);
+			$result = $this->tryHttpPostToShareEndpoint($url, '', $fields, true);
+
+			if (isset($result['statusCode']) && $result['statusCode'] === 201) {
+				\OC_Hook::emit('OCP\Share', 'federated_share_added', ['server' => $remote]);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	protected function sendPreOcmRemoteShare($token, $shareWith, $name, $remote_id, $owner, $ownerFederatedId, $sharedBy, $sharedByFederatedId) {
+		list($user, $remote) = $this->addressHandler->splitUserRemote($shareWith);
+
+		if ($user && $remote) {
+			$url = $remote;
+			$local = $this->addressHandler->generateRemoteURL();
+
+			$fields = [
+				'shareWith' => $user,
+				'token' => $token,
+				'name' => $name,
+				'remoteId' => $remote_id,
+				'owner' => $owner,
+				'ownerFederatedId' => $ownerFederatedId,
+				'sharedBy' => $sharedBy,
+				'sharedByFederatedId' => $sharedByFederatedId,
+				'remote' => $local,
+			];
+
+			$url = $this->addressHandler->removeProtocolFromUrl($url);
+			$result = $this->tryHttpPostToShareEndpoint($url, '', $fields);
+			$status = \json_decode($result['result'], true);
+
+			if ($result['success'] && ($status['ocs']['meta']['statuscode'] === 100 || $status['ocs']['meta']['statuscode'] === 200)) {
+				\OC_Hook::emit('OCP\Share', 'federated_share_added', ['server' => $remote]);
+				return true;
+			}
+		}
+		return false;
 	}
 }

@@ -28,6 +28,7 @@ use OCA\FederatedFileSharing\Ocm\Exception\BadRequestException;
 use OCA\FederatedFileSharing\Ocm\Exception\ForbiddenException;
 use OCA\FederatedFileSharing\Ocm\Exception\NotImplementedException;
 use OCA\FederatedFileSharing\Ocm\Notification\FileNotification;
+use OCP\App\IAppManager;
 use OCP\AppFramework\Http\JSONResponse;
 use OCA\FederatedFileSharing\FedShareManager;
 use OCA\FederatedFileSharing\Ocm\Exception\OcmException;
@@ -59,6 +60,11 @@ class OcmController extends Controller {
 	protected $urlGenerator;
 
 	/**
+	 * @var IAppManager
+	 */
+	private $appManager;
+
+	/**
 	 * @var IUserManager
 	 */
 	protected $userManager;
@@ -85,6 +91,7 @@ class OcmController extends Controller {
 	 * @param IRequest $request
 	 * @param FederatedShareProvider $federatedShareProvider
 	 * @param IURLGenerator $urlGenerator
+	 * @param IAppManager $appManager
 	 * @param IUserManager $userManager
 	 * @param AddressHandler $addressHandler
 	 * @param FedShareManager $fedShareManager
@@ -94,6 +101,7 @@ class OcmController extends Controller {
 									IRequest $request,
 									FederatedShareProvider $federatedShareProvider,
 									IURLGenerator $urlGenerator,
+									IAppManager $appManager,
 									IUserManager $userManager,
 									AddressHandler $addressHandler,
 									FedShareManager $fedShareManager,
@@ -103,6 +111,7 @@ class OcmController extends Controller {
 
 		$this->federatedShareProvider = $federatedShareProvider;
 		$this->urlGenerator = $urlGenerator;
+		$this->appManager = $appManager;
 		$this->userManager = $userManager;
 		$this->addressHandler = $addressHandler;
 		$this->fedShareManager = $fedShareManager;
@@ -177,6 +186,7 @@ class OcmController extends Controller {
 
 	) {
 		try {
+			$this->assertIncomingSharingEnabled();
 			$hasMissingParams = $this->hasNull(
 				[$shareWith, $name, $providerId, $owner, $shareType, $resourceType]
 			);
@@ -393,6 +403,36 @@ class OcmController extends Controller {
 		return [
 			'webdav' => '/public.php/webdav/'
 		];
+	}
+
+	/**
+	 * Make sure that incoming shares are enabled
+	 *
+	 * @return void
+	 *
+	 * @throws NotImplementedException
+	 */
+	protected function assertIncomingSharingEnabled() {
+		if (!$this->appManager->isEnabledForUser('files_sharing')
+			|| !$this->federatedShareProvider->isIncomingServer2serverShareEnabled()
+		) {
+			throw new NotImplementedException();
+		}
+	}
+
+	/**
+	 * Make sure that outgoing shares are enabled
+	 *
+	 * @return void
+	 *
+	 * @throws NotImplementedException
+	 */
+	protected function assertOutgoingSharingEnabled() {
+		if (!$this->appManager->isEnabledForUser('files_sharing')
+			|| !$this->federatedShareProvider->isOutgoingServer2serverShareEnabled()
+		) {
+			throw new NotImplementedException();
+		}
 	}
 
 	/**
